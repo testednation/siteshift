@@ -1,0 +1,6 @@
+{
+  "name": "PressPort",
+  "description": "Automated and offline Wix & Strikingly to WordPress migration tool that replaces external JavaScript with lightweight local assets for offline functionality and faster load performance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
