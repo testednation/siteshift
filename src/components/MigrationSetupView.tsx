@@ -1,17 +1,22 @@
 import { useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
 import {
   ArrowRight,
+  BookOpen,
   FileArchive,
   FileCode,
   Globe,
   Loader2,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 import type { MigrationOptions, PlatformType, SampleId } from '../types/migration';
 import { formatBytes } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
 
 type SourceTab = 'url' | 'offline' | 'paste';
+
+const TUTORIAL_BANNER_STORAGE_KEY = 'pressport_hide_tutorial_banner_v1';
 
 interface UploadedLocalFile {
   name: string;
@@ -30,6 +35,7 @@ interface MigrationSetupViewProps {
     options: MigrationOptions,
   ) => Promise<void>;
   onRunSample: (sampleId: SampleId, options: MigrationOptions) => Promise<void>;
+  onOpenTutorial?: () => void;
 }
 
 const DEFAULT_OPTIONS: MigrationOptions = {
@@ -72,6 +78,7 @@ export function MigrationSetupView({
   onRunUrl,
   onRunOffline,
   onRunSample,
+  onOpenTutorial,
 }: MigrationSetupViewProps) {
   const [sourceTab, setSourceTab] = useState<SourceTab>('url');
   const [urlInput, setUrlInput] = useState('');
@@ -79,7 +86,23 @@ export function MigrationSetupView({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedLocalFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [options, setOptions] = useState<MigrationOptions>(DEFAULT_OPTIONS);
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(TUTORIAL_BANNER_STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDismissBanner = () => {
+    setBannerDismissed(true);
+    try {
+      window.localStorage.setItem(TUTORIAL_BANNER_STORAGE_KEY, '1');
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   const handleFilesSelected = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
@@ -148,6 +171,39 @@ export function MigrationSetupView({
         </p>
       </div>
 
+      {/* Non-blocking Beginner Quick-Start Strip */}
+      {onOpenTutorial && !bannerDismissed && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+              <BookOpen className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <p className="text-xs leading-relaxed text-slate-600 sm:text-sm">
+              <strong className="font-semibold text-slate-900">First time migrating to WordPress?</strong>{' '}
+              Follow our 4-step Beginner Tutorial or hover any info icon for plain-English explanations.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenTutorial}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 transition-colors hover:border-blue-600 hover:text-blue-700 whitespace-nowrap"
+            >
+              Open Beginner Tutorial
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={handleDismissBanner}
+              aria-label="Dismiss beginner guide strip"
+              className="rounded p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div
           role="alert"
@@ -163,7 +219,14 @@ export function MigrationSetupView({
         <div className="rounded-lg border border-slate-200 bg-white p-6 lg:col-span-7">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
             <div>
-              <h2 className="font-display text-base font-semibold text-slate-900">1. Choose Site Source</h2>
+              <div className="flex items-center gap-1.5">
+                <h2 className="font-display text-base font-semibold text-slate-900">1. Choose Site Source</h2>
+                <InfoTooltip
+                  title="Choosing a Site Source"
+                  content="Use Live URL for published websites, Offline Upload for saved .html or .zip folders on your computer, or Paste HTML for a single page's source code."
+                  tip="If a site blocks automated crawlers, save the page in Chrome (Ctrl/Cmd+S → Webpage, Complete), zip the folder, and use Offline Upload."
+                />
+              </div>
               <p className="mt-0.5 text-xs text-slate-500">
                 Works with live public URLs or 100% offline local HTML/ZIP exports.
               </p>
@@ -242,9 +305,15 @@ export function MigrationSetupView({
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label htmlFor="max-pages" className="block text-sm font-medium text-slate-800">
-                      Crawl Page Limit
-                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <label htmlFor="max-pages" className="block text-sm font-medium text-slate-800">
+                        Crawl Page Limit
+                      </label>
+                      <InfoTooltip
+                        title="Crawl Page Limit"
+                        content="Controls how many internal pages PressPort follows from your starting URL. Start with 1–3 pages to test the output quickly, or pick up to 10 pages for a fuller site crawl."
+                      />
+                    </div>
                     <select
                       id="max-pages"
                       value={options.maxPages}
@@ -259,9 +328,16 @@ export function MigrationSetupView({
                   </div>
 
                   <div>
-                    <label htmlFor="platform-hint" className="block text-sm font-medium text-slate-800">
-                      Source Platform Detection
-                    </label>
+                    <div className="flex items-center gap-1.5">
+                      <label htmlFor="platform-hint" className="block text-sm font-medium text-slate-800">
+                        Source Platform Detection
+                      </label>
+                      <InfoTooltip
+                        title="Source Platform Detection"
+                        content="PressPort automatically detects whether your site was built on Wix, Squarespace, Strikingly, Webflow, or Weebly so it can strip each builder's specific scripts cleanly."
+                        tip="Leave on Auto-detect unless your site uses a custom domain with hidden builder tags."
+                      />
+                    </div>
                     <select
                       id="platform-hint"
                       value={options.platformHint}
@@ -419,6 +495,12 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, replacePlatformJs: checked }))}
               title="Replace site-builder runtime JS"
               description="Replaces heavy Wix Thunderbolt, Squarespace universal JS, Strikingly Bobcat, Webflow, and Weebly bundles with our 3.5 KB local runtime."
+              tooltip={{
+                title: 'Why replace builder JavaScript?',
+                content:
+                  'Hosted builders ship hundreds of kilobytes of proprietary code that only works on their servers. Replacing it with pressport-runtime.js keeps mobile menus, lightboxes, and forms working offline.',
+                tip: 'Recommended for almost all WordPress migrations.',
+              }}
             />
             <PolicyToggle
               id="opt-strip-trackers"
@@ -426,6 +508,11 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, stripTrackers: checked }))}
               title="Strip telemetry & third-party trackers"
               description="Removes Frog BI, Squarespace performance scripts, Mixpanel, Segment, Tag Manager, and proprietary JSON hydration blobs."
+              tooltip={{
+                title: 'Removing Trackers & Telemetry',
+                content:
+                  'Deletes analytics beacons and hidden builder metadata that slow down page loads and fail when running offline. You can add fresh WordPress analytics plugins later if needed.',
+              }}
             />
             <PolicyToggle
               id="opt-localize-js"
@@ -433,6 +520,11 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, localizeExternalJs: checked }))}
               title="Localize custom & widget JavaScript"
               description="Downloads remaining external scripts into assets/js/ and registers them via wp_enqueue_script()."
+              tooltip={{
+                title: 'Localizing Custom Scripts',
+                content:
+                  'Saves any remaining custom scripts inside your WordPress theme folder and loads them the official WordPress way via functions.php so nothing relies on external hosts.',
+              }}
             />
             <PolicyToggle
               id="opt-localize-css"
@@ -440,6 +532,11 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, localizeStylesAndFonts: checked }))}
               title="Bundle local CSS & disable WP emoji CDN"
               description="Rewrites stylesheets to local theme paths and removes default remote WordPress head scripts."
+              tooltip={{
+                title: 'Local CSS & WP Emoji Cleanup',
+                content:
+                  'Copies stylesheets locally into your theme and disables WordPress’s default external emoji script request so your pages achieve zero third-party network requests.',
+              }}
             />
             <PolicyToggle
               id="opt-localize-img"
@@ -447,6 +544,11 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, localizeImages: checked }))}
               title="Localize images for offline rendering"
               description="Rewrites wixstatic.com, squarespace-cdn.com, strikinglycdn.com, and website-files.com media URLs to local assets/images/."
+              tooltip={{
+                title: 'Why localize images?',
+                content:
+                  'If your old Wix or Squarespace subscription ends, hotlinked images on their CDN stop loading. Localizing saves every image inside your export so you own them permanently.',
+              }}
             />
             <PolicyToggle
               id="opt-optimize-jpeg"
@@ -454,6 +556,12 @@ export function MigrationSetupView({
               onChange={(checked) => setOptions((o) => ({ ...o, optimizeImagesToJpeg: checked }))}
               title="Optimize high-res images to progressive JPEG"
               description="Compresses and converts WebP and heavy PNG images into progressive JPEGs (82% quality, max 1600px wide) during migration. Can also be toggled anytime in Assets & Scripts."
+              tooltip={{
+                title: 'Image Optimizer (Progressive JPEG)',
+                content:
+                  'Automatically resizes oversized images and converts heavy PNG or WebP files into fast-loading progressive JPEGs. Crisp SVG logos and icons are kept untouched.',
+                tip: 'You can also toggle this and adjust quality anytime later inside Assets & Scripts.',
+              }}
             />
           </div>
         </div>
@@ -605,9 +713,14 @@ interface PolicyToggleProps {
   onChange: (checked: boolean) => void;
   title: string;
   description: string;
+  tooltip?: {
+    title: string;
+    content: string;
+    tip?: string;
+  };
 }
 
-function PolicyToggle({ id, checked, onChange, title, description }: PolicyToggleProps) {
+function PolicyToggle({ id, checked, onChange, title, description, tooltip }: PolicyToggleProps) {
   return (
     <label htmlFor={id} className="flex cursor-pointer items-start gap-3 py-3.5">
       <input
@@ -618,7 +731,12 @@ function PolicyToggle({ id, checked, onChange, title, description }: PolicyToggl
         className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
       />
       <span className="min-w-0">
-        <span className="block text-sm font-medium text-slate-900">{title}</span>
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-900">
+          <span>{title}</span>
+          {tooltip && (
+            <InfoTooltip title={tooltip.title} content={tooltip.content} tip={tooltip.tip} />
+          )}
+        </span>
         <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">{description}</span>
       </span>
     </label>

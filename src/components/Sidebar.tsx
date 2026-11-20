@@ -1,5 +1,6 @@
 import {
   ArrowRightLeft,
+  BookOpen,
   Code2,
   Download,
   FileCode2,
@@ -11,7 +12,7 @@ import {
 import type { MigrationResult } from '../types/migration';
 import { formatPlatformLabel } from '../utils/format';
 
-export type WorkspaceTab = 'setup' | 'pages' | 'assets' | 'wordpress' | 'export' | 'logs';
+export type WorkspaceTab = 'setup' | 'pages' | 'assets' | 'wordpress' | 'export' | 'logs' | 'tutorial';
 
 interface SidebarProps {
   activeTab: WorkspaceTab;
@@ -37,6 +38,7 @@ const NAV_ITEMS: Array<{
   { id: 'wordpress', label: 'WordPress Output', requiresResult: true, icon: Code2 },
   { id: 'export', label: 'Export & Deploy', requiresResult: true, icon: Download },
   { id: 'logs', label: 'Export Logs', requiresResult: false, icon: ScrollText },
+  { id: 'tutorial', label: 'Beginner Tutorial', requiresResult: false, icon: BookOpen },
 ];
 
 export function Sidebar({

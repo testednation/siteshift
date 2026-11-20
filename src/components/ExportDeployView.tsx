@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { ExportFormat, MigrationResult } from '../types/migration';
 import { formatBytes, formatPlatformLabel } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
 
 interface ExportDeployViewProps {
   migration: MigrationResult;
@@ -48,6 +49,7 @@ export function ExportDeployView({
     ctaLabel: string;
     primary?: boolean;
     icon: typeof Download;
+    tooltip: { title: string; content: string; tip?: string };
   }> = [
     {
       format: 'offline',
@@ -59,6 +61,11 @@ export function ExportDeployView({
       ctaLabel: 'Download Offline ZIP',
       primary: true,
       icon: FolderArchive,
+      tooltip: {
+        title: 'Best for Instant Offline Viewing',
+        content:
+          'Does not require WordPress at all. Unzip on your laptop and double-click index.html to browse your migrated site offline or host it on any static host.',
+      },
     },
     {
       format: 'theme',
@@ -70,6 +77,12 @@ export function ExportDeployView({
       ctaLabel: 'Download WP Theme',
       primary: true,
       icon: FileArchive,
+      tooltip: {
+        title: 'Step 1 of 2 for WordPress',
+        content:
+          'Installs your site’s design, clean PHP templates, and local CSS/JS/images inside WordPress. Pair this with the WXR XML file to populate your pages.',
+        tip: 'Upload the .zip directly without unzipping it first.',
+      },
     },
     {
       format: 'wxr',
@@ -80,6 +93,11 @@ export function ExportDeployView({
       details: 'Import via WP Admin → Tools → Import → WordPress',
       ctaLabel: 'Download XML',
       icon: FileCode2,
+      tooltip: {
+        title: 'Step 2 of 2 for WordPress',
+        content:
+          'Creates all of your migrated pages and editable Gutenberg blocks inside WordPress. If WordPress prompts you to install the official "WordPress Importer" plugin, click Install Now.',
+      },
     },
     {
       format: 'assets',
@@ -90,6 +108,11 @@ export function ExportDeployView({
       details: 'Drop assets/ directly into an existing child theme directory',
       ctaLabel: 'Download Assets ZIP',
       icon: Download,
+      tooltip: {
+        title: 'For Existing WordPress Themes',
+        content:
+          'Pick this if you already have a favorite WordPress theme (like Astra, GeneratePress, or Twenty Twenty-Five) and only want the cleaned local images, CSS, and JS files.',
+      },
     },
   ];
 
@@ -136,9 +159,16 @@ export function ExportDeployView({
                       <Icon className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <div>
-                      <h2 className="font-display text-base font-semibold text-slate-950">
-                        {artifact.title}
-                      </h2>
+                      <div className="flex items-center gap-1.5">
+                        <h2 className="font-display text-base font-semibold text-slate-950">
+                          {artifact.title}
+                        </h2>
+                        <InfoTooltip
+                          title={artifact.tooltip.title}
+                          content={artifact.tooltip.content}
+                          tip={artifact.tooltip.tip}
+                        />
+                      </div>
                       <p className="font-mono text-xs text-slate-500">{artifact.filename}</p>
                     </div>
                   </div>

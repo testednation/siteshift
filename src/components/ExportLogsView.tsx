@@ -29,6 +29,7 @@ import {
   formatExportLogText,
 } from '../utils/exportLogFormat';
 import { formatBytes, formatPlatformLabel } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
 
 interface ExportLogsViewProps {
   logs: ExportLogEntry[];
@@ -213,7 +214,14 @@ export function ExportLogsView({
       {/* Page Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl font-bold text-slate-950">Export Logs</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-2xl font-bold text-slate-950">Export Logs</h1>
+            <InfoTooltip
+              title="How Export Logs Help Beginners"
+              content="Every time you download a Theme, WXR XML, or Offline ZIP, PressPort records a step-by-step trace here. If an image was skipped or a WordPress import shows a warning, download the .log file to see exactly why."
+              tip="Press / anywhere on this page to quickly search logs by site name or platform."
+            />
+          </div>
           <p className="mt-1 text-sm text-slate-600">
             Audit trail of WordPress Theme, WXR 1.2 XML, Offline ZIP, and asset export operations with downloadable
             diagnostic logs.

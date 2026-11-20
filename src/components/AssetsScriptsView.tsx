@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { AssetAction, AssetKind, MigrationResult } from '../types/migration';
 import { formatActionLabel, formatBytes } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
 
 interface AssetsScriptsViewProps {
   migration: MigrationResult;
@@ -380,8 +381,13 @@ export function AssetsScriptsView({
           return (
             <div className="border-t border-slate-200 bg-slate-50/60 px-4 py-3.5">
               <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-                <span className="font-medium text-slate-800">
-                  Exported Bundle Size vs. Original Site
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-800">
+                  <span>Exported Bundle Size vs. Original Site</span>
+                  <InfoTooltip
+                    title="Exported Bundle Size Bar"
+                    content="Compares the total size of your cleaned export package against the original site. A shorter blue bar means a lighter, faster-loading WordPress site."
+                    tip="Turning on the Image Optimizer or setting heavy scripts to Ignore updates this bar live."
+                  />
                 </span>
                 <div className="flex flex-wrap items-center gap-2 font-mono tabular-nums text-slate-600">
                   <span className="font-semibold text-slate-950">
@@ -510,7 +516,13 @@ export function AssetsScriptsView({
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 bg-slate-50/70 px-5 py-3">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-slate-600 whitespace-nowrap">JPEG Quality:</span>
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 whitespace-nowrap">
+                <span>JPEG Quality:</span>
+                <InfoTooltip
+                  title="JPEG Compression Quality"
+                  content="Balances sharpness against file size. 82% Balanced looks nearly identical to the original while shrinking file sizes dramatically; 70% Compact saves the most space."
+                />
+              </span>
               <div
                 role="group"
                 aria-label="JPEG compression quality"
@@ -540,9 +552,14 @@ export function AssetsScriptsView({
             </div>
 
             <div className="flex items-center gap-2">
-              <label htmlFor="image-opt-max-width" className="text-xs font-medium text-slate-600 whitespace-nowrap">
-                Max Width:
-              </label>
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 whitespace-nowrap">
+                <label htmlFor="image-opt-max-width">Max Width:</label>
+                <InfoTooltip
+                  title="Maximum Image Width"
+                  content="Scales down oversized photos (for example 4000px camera uploads) to a web-friendly width. Smaller images are never stretched larger."
+                  tip="1600 px looks crisp on retina desktop screens while keeping WordPress pages fast."
+                />
+              </span>
               <select
                 id="image-opt-max-width"
                 value={imageMaxWidth}
@@ -766,7 +783,16 @@ export function AssetsScriptsView({
                 <th className="px-4 py-2.5">Local Destination</th>
                 <th className="px-4 py-2.5 text-right">Before</th>
                 <th className="px-4 py-2.5 text-right">After</th>
-                <th className="px-4 py-2.5">Migration Policy</th>
+                <th className="px-4 py-2.5">
+                  <span className="inline-flex items-center gap-1">
+                    <span>Migration Policy</span>
+                    <InfoTooltip
+                      title="Asset Migration Policies"
+                      content="Download saves the file locally in your export. Inline embeds small code directly in HTML. Replace w/ Local Runtime swaps heavy builder JS for pressport-runtime.js. Ignore removes trackers or bloat completely."
+                      tip="Check multiple rows (Shift+click for ranges) to apply one policy in bulk."
+                    />
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

@@ -3,6 +3,45 @@ import { Check, Copy, Download, FileCode2, FileText, FolderArchive, Loader2 } fr
 import type { ExportFormat } from '../App';
 import type { MigrationResult } from '../types/migration';
 import { formatBytes } from '../utils/format';
+import { InfoTooltip } from './InfoTooltip';
+
+function describeWpFile(filePath: string | undefined, wxrKey: string): string {
+  if (!filePath) return '';
+  if (filePath === wxrKey || filePath.endsWith('.xml')) {
+    return 'WordPress import file (WXR 1.2): upload via WP Admin → Tools → Import → WordPress to create all your pages and Gutenberg blocks.';
+  }
+  if (filePath === 'functions.php') {
+    return 'Theme control file: registers menus, enables Gutenberg editor support, loads your local JS/CSS via wp_enqueue_script(), and disables remote WP emoji scripts.';
+  }
+  if (filePath === 'style.css') {
+    return 'Theme identity header: tells WordPress your theme’s name, version, and author so it appears in Appearance → Themes.';
+  }
+  if (filePath === 'header.php') {
+    return 'Shared top template: outputs the <head> tags, site title, and primary navigation bar shown across every WordPress page.';
+  }
+  if (filePath === 'footer.php') {
+    return 'Shared bottom template: renders the site footer and triggers wp_footer() so local scripts load cleanly at the bottom of the page.';
+  }
+  if (filePath === 'front-page.php') {
+    return 'Homepage template: renders your migrated home page content when set as the Static Front Page in WordPress Settings → Reading.';
+  }
+  if (filePath === 'page.php') {
+    return 'Standard page template: displays the Gutenberg block content for every sub-page imported from your old site.';
+  }
+  if (filePath === 'index.php') {
+    return 'Fallback WordPress template: required by every valid WordPress theme to display posts or pages if a more specific template isn’t matched.';
+  }
+  if (filePath.includes('pressport-runtime.js')) {
+    return 'Lightweight 3.5 KB local JavaScript replacement for heavy Wix/Squarespace/Strikingly runtimes—handles mobile menus, smooth scroll, lightboxes, and forms offline.';
+  }
+  if (filePath.includes('pressport-base.css')) {
+    return 'Local base stylesheet: provides clean responsive typography, spacing, and Gutenberg block styling with zero external CDN requests.';
+  }
+  if (filePath.toLowerCase().includes('readme')) {
+    return 'Step-by-step installation notes bundled inside your ZIP so you can reference import steps offline anytime.';
+  }
+  return 'Generated local asset bundled directly inside your WordPress theme folder so your site runs fast and offline.';
+}
 
 interface WordPressOutputViewProps {
   migration: MigrationResult;
@@ -41,9 +80,16 @@ export function WordPressOutputView({
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-xl font-bold text-slate-950">
-            Generated WordPress Theme &amp; WXR 1.2 XML
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-xl font-bold text-slate-950">
+              Generated WordPress Theme &amp; WXR 1.2 XML
+            </h1>
+            <InfoTooltip
+              title="Theme Files vs. WXR 1.2 XML"
+              content="In WordPress, the Theme (.zip) controls your site's layout, CSS, and local scripts, while the WXR 1.2 (.xml) file imports your actual pages and editable Gutenberg blocks."
+              tip="You don't need to edit these files manually—just inspect them here if you're curious, then download from Export & Deploy."
+            />
+          </div>
           <p className="mt-1 text-sm text-slate-600">
             Inspect every PHP template, local script enqueue in <code className="font-mono text-xs">functions.php</code>,
             and the Gutenberg WXR import file before downloading.
@@ -176,7 +222,13 @@ export function WordPressOutputView({
               )}
             </button>
           </div>
-          <pre className="h-[620px] overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-100">
+          {activeFile && (
+            <div className="border-b border-slate-200 bg-blue-50/50 px-4 py-2 text-xs leading-relaxed text-slate-700">
+              <span className="font-semibold text-blue-900">What this file does:</span>{' '}
+              {describeWpFile(activeFile.path, wxrKey)}
+            </div>
+          )}
+          <pre className="h-[590px] overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-100">
             <code>{activeFile?.content || ''}</code>
           </pre>
         </div>

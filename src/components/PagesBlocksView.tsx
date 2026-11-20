@@ -18,6 +18,7 @@ import type { ExportFormat } from '../App';
 import type { ExtractedBlock, ExtractedSection, MigrationResult } from '../types/migration';
 import { formatBytes, formatPlatformLabel } from '../utils/format';
 import { buildWpInstantPreviewDoc } from '../utils/wpInstantPreview';
+import { InfoTooltip } from './InfoTooltip';
 
 interface PagesBlocksViewProps {
   migration: MigrationResult;
@@ -184,7 +185,13 @@ export function PagesBlocksView({
           </div>
         </div>
         <div className="p-4">
-          <div className="text-xs font-medium text-slate-500">JS Payload Reduced</div>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <span>JS Payload Reduced</span>
+            <InfoTooltip
+              title="JavaScript Payload Reduced"
+              content="Shows how much builder JavaScript was removed or swapped for our 3.5 KB local runtime. Less JavaScript means much faster page loads on WordPress and mobile devices."
+            />
+          </div>
           <div className="mt-1 font-mono text-lg font-semibold text-emerald-700 tabular-nums">
             -{migration.metrics.jsPercentSaved}%
           </div>
@@ -193,14 +200,26 @@ export function PagesBlocksView({
           </div>
         </div>
         <div className="p-4">
-          <div className="text-xs font-medium text-slate-500">External CDN Requests</div>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <span>External CDN Requests</span>
+            <InfoTooltip
+              title="External CDN Requests"
+              content="Counts how many scripts, stylesheets, and images used to load from external builder servers (like wixstatic.com or squarespace-cdn.com). Reaching 0 means your site works 100% offline."
+            />
+          </div>
           <div className="mt-1 font-mono text-lg font-semibold text-slate-950 tabular-nums">
             {migration.metrics.externalRequestsBefore} → {migration.metrics.externalRequestsAfter}
           </div>
           <div className="mt-0.5 text-xs text-slate-500">100% local offline execution</div>
         </div>
         <div className="p-4">
-          <div className="text-xs font-medium text-slate-500">Gutenberg Blocks</div>
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <span>Gutenberg Blocks</span>
+            <InfoTooltip
+              title="WordPress Gutenberg Blocks"
+              content="Gutenberg is WordPress's visual page editor. PressPort translates headings, paragraphs, images, lists, and buttons into editable native blocks instead of a single locked HTML blob."
+            />
+          </div>
           <div className="mt-1 font-mono text-lg font-semibold text-slate-950 tabular-nums">
             {migration.metrics.gutenbergBlocksGenerated}
           </div>
@@ -269,9 +288,15 @@ export function PagesBlocksView({
           <div className="rounded-lg border border-slate-200 bg-white">
             <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div>
-                <h3 className="font-display text-sm font-semibold text-slate-900">
-                  WordPress Block Tree ({selectedPage.sections.length})
-                </h3>
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-display text-sm font-semibold text-slate-900">
+                    WordPress Block Tree ({selectedPage.sections.length})
+                  </h3>
+                  <InfoTooltip
+                    title="WordPress Block Tree"
+                    content="Lists every section (wp:group) and individual block (headings, paragraphs, images, buttons) that will appear in your WordPress editor. Expand a section and click any item to isolate it in the preview."
+                  />
+                </div>
                 <p className="mt-0.5 text-[11px] text-slate-500">
                   Click any section or block to inspect in Instant Preview.
                 </p>
@@ -459,6 +484,11 @@ export function PagesBlocksView({
                   </span>
                   <span className="text-slate-300" aria-hidden="true">·</span>
                   <span className="shrink-0 text-slate-500">Minimal CSS reset</span>
+                  <InfoTooltip
+                    title="Instant Preview (Minimal CSS Reset)"
+                    content="Displays your converted WordPress structure using a clean neutral stylesheet (no old Wix/Squarespace theme CSS) so you can check heading order, images, and spacing before importing."
+                    tip="Toggle Block Outlines to see where each Gutenberg block starts and ends, or switch to Offline Theme to see the styled page."
+                  />
                   {selection.scope !== 'page' && (
                     <>
                       <span className="text-slate-300" aria-hidden="true">·</span>

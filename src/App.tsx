@@ -6,6 +6,7 @@ import { ExportLogsView } from './components/ExportLogsView';
 import { MigrationSetupView } from './components/MigrationSetupView';
 import { PagesBlocksView } from './components/PagesBlocksView';
 import { Sidebar, type WorkspaceTab } from './components/Sidebar';
+import { TutorialGuideView } from './components/TutorialGuideView';
 import { WordPressOutputView } from './components/WordPressOutputView';
 import type {
   AssetAction,
@@ -34,6 +35,22 @@ const TAB_LABELS: Record<WorkspaceTab, string> = {
   wordpress: 'WordPress Output',
   export: 'Export & Deploy',
   logs: 'Export Logs',
+  tutorial: 'Beginner Tutorial',
+};
+
+const GUIDED_SAMPLE_OPTIONS: MigrationOptions = {
+  platformHint: 'auto',
+  maxPages: 5,
+  offlineOnly: true,
+  stripTrackers: true,
+  replacePlatformJs: true,
+  localizeExternalJs: true,
+  localizeStylesAndFonts: true,
+  localizeImages: true,
+  optimizeImagesToJpeg: false,
+  imageJpegQuality: 82,
+  imageMaxWidth: 1600,
+  generateGutenbergBlocks: true,
 };
 
 function triggerBlobDownload(blob: Blob, filename: string) {
@@ -495,7 +512,7 @@ export default function App() {
             </button>
             <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-sm">
               <span className="font-medium text-slate-500 whitespace-nowrap">PressPort</span>
-              {activeMigration && activeTab !== 'setup' && activeTab !== 'logs' && (
+              {activeMigration && activeTab !== 'setup' && activeTab !== 'logs' && activeTab !== 'tutorial' && (
                 <>
                   <span className="text-slate-300" aria-hidden="true">/</span>
                   <span className="truncate font-medium text-slate-700">{activeMigration.siteName}</span>
@@ -556,6 +573,7 @@ export default function App() {
               onRunUrl={handleRunUrl}
               onRunOffline={handleRunOffline}
               onRunSample={handleRunSample}
+              onOpenTutorial={() => setActiveTab('tutorial')}
             />
           )}
 
@@ -607,6 +625,17 @@ export default function App() {
               onGoToExport={() => setActiveTab('export')}
               onGoToSetup={() => setActiveTab('setup')}
               onQuickExport={handleDownload}
+            />
+          )}
+
+          {activeTab === 'tutorial' && (
+            <TutorialGuideView
+              activeMigration={activeMigration}
+              migrationsCount={history.length}
+              exportLogsCount={exportLogs.length}
+              loadingSample={loading}
+              onNavigateTab={setActiveTab}
+              onLaunchGuidedSample={(sampleId) => void handleRunSample(sampleId, GUIDED_SAMPLE_OPTIONS)}
             />
           )}
         </main>
