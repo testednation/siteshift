@@ -11,6 +11,7 @@ import {
   Layers,
   Loader2,
   Monitor,
+  PackageCheck,
   Smartphone,
   Tablet,
 } from 'lucide-react';
@@ -448,10 +449,23 @@ export function PagesBlocksView({
               </button>
             </div>
 
-            <div className="flex items-center gap-3 text-xs text-slate-500 tabular-nums">
+            <div className="flex items-center gap-2.5 text-xs text-slate-500 tabular-nums">
               <span className="font-mono">
                 {formatBytes(selectedPage.originalHtmlBytes)} → {formatBytes(selectedPage.cleanedHtmlBytes)}
               </span>
+              <button
+                type="button"
+                disabled={downloadingFormat !== null}
+                onClick={() => onDownload('updated')}
+                className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800 transition-colors hover:border-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap"
+              >
+                {downloadingFormat === 'updated' ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                Download Updated ZIP
+              </button>
               {(inspectorMode === 'gutenberg' || inspectorMode === 'html') && (
                 <button
                   type="button"

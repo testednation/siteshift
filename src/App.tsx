@@ -1,5 +1,6 @@
+import JSZip from 'jszip';
 import { useCallback, useEffect, useState } from 'react';
-import { Download, FolderArchive, Loader2, Menu, Plus } from 'lucide-react';
+import { Archive, Download, FolderArchive, Loader2, Menu, PackageCheck, Plus } from 'lucide-react';
 import { AssetsScriptsView } from './components/AssetsScriptsView';
 import { ExportDeployView } from './components/ExportDeployView';
 import { ExportLogsView } from './components/ExportLogsView';
@@ -21,12 +22,35 @@ import {
   formatExportFormatLabel,
   formatExportLogText,
 } from './utils/exportLogFormat';
+import {
+  clearStoredMigrationKpis,
+  loadStoredMigrationKpis,
+  upsertMigrationKpi,
+  type MigrationKpiRecord,
+} from './utils/migrationKpis';
 import { buildClientOfflineZip } from './utils/offlineZipFallback';
 
 export type { ExportFormat };
 
 const EXPORT_LOGS_STORAGE_KEY = 'pressport_export_logs_v1';
+const AUTO_OPTIMIZE_STORAGE_KEY = 'pressport_auto_optimize_assets_v1';
 const MAX_CACHED_LOGS = 100;
+
+function loadAutoOptimizeSetting(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_OPTIMIZE_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveAutoOptimizeSetting(enabled: boolean) {
+  try {
+    window.localStorage.setItem(AUTO_OPTIMIZE_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 const TAB_LABELS: Record<WorkspaceTab, string> = {
   setup: 'New Migration',
@@ -108,7 +132,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [updatingPolicies, setUpdatingPolicies] = useState(false);
   const [downloadingFormat, setDownloadingFormat] = useState<ExportFormat | null>(null);
+  const [bulkExporting, setBulkExporting] = useState(false);
   const [exportLogs, setExportLogs] = useState<ExportLogEntry[]>(() => loadCachedExportLogs());
+  const [kpiRecords, setKpiRecords] = useState<MigrationKpiRecord[]>(() =>
+    loadStoredMigrationKpis(),
+  );
+  const [autoOptimizeAssets, setAutoOptimizeAssets] = useState<boolean>(() =>
+    loadAutoOptimizeSetting(),
+  );
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -152,6 +183,7 @@ export default function App() {
 
   const commitMigrationResult = (result: MigrationResult) => {
     setHistory((prev) => [result, ...prev.filter((item) => item.id !== result.id)].slice(0, 10));
+    setKpiRecords((prev) => upsertMigrationKpi(prev, result));
     setActiveMigrationId(result.id);
     setActiveTab('pages');
     setError(null);
@@ -242,6 +274,7 @@ export default function App() {
       }
       const updated = data as MigrationResult;
       setHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setKpiRecords((prev) => upsertMigrationKpi(prev, updated));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update asset policy.');
     } finally {
@@ -268,6 +301,7 @@ export default function App() {
       }
       const updated = data as MigrationResult;
       setHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setKpiRecords((prev) => upsertMigrationKpi(prev, updated));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not optimize images.');
     } finally {
@@ -287,6 +321,8 @@ export default function App() {
       theme: `${activeMigration.siteSlug}-wp-theme.zip`,
       offline: `${activeMigration.siteSlug}-offline-local.zip`,
       assets: `${activeMigration.siteSlug}-local-assets.zip`,
+      source: `${activeMigration.siteSlug}-site-source.zip`,
+      updated: `${activeMigration.siteSlug}-updated-gutenberg.zip`,
     };
 
     const runClientOfflineFallback = async (reason: string) => {
@@ -484,6 +520,177 @@ export default function App() {
     }
   };
 
+  const handleBulkExport = async (
+    items: Array<{ migration: MigrationResult; format: ExportFormat }>,
+  ) => {
+    if (items.length === 0 || bulkExporting || downloadingFormat !== null) return;
+    setBulkExporting(true);
+    setError(null);
+
+    const startedAtMs = Date.now();
+    const startedAtIso = new Date(startedAtMs).toISOString();
+    const stamp = startedAtIso.replace(/[:.]/g, '-').slice(0, 19);
+    const fallbackFilename = `pressport-bulk-${items.length}-sites-${stamp}.zip`;
+
+    const buildClientBulkFallback = async (reason: string) => {
+      const masterZip = new JSZip();
+      let totalFiles = 0;
+
+      for (let i = 0; i < items.length; i++) {
+        const { migration: itemMigration, format } = items[i];
+        const prefix = `${String(i + 1).padStart(2, '0')}-${itemMigration.siteSlug}-${format}`;
+        const folder = masterZip.folder(prefix)!;
+        if (format === 'wxr') {
+          folder.file(`${itemMigration.siteSlug}-wordpress-wxr.xml`, itemMigration.wxrXml);
+          totalFiles += 1;
+        } else {
+          const singleBlob = await buildClientOfflineZip(itemMigration);
+          const innerZip = await JSZip.loadAsync(singleBlob);
+          const innerEntries = Object.values(innerZip.files).filter((entry) => !entry.dir);
+          for (const entry of innerEntries) {
+            const bytes = await entry.async('uint8array');
+            folder.file(entry.name, bytes);
+            totalFiles += 1;
+          }
+        }
+      }
+
+      masterZip.file(
+        'BULK-EXPORT-MANIFEST.json',
+        JSON.stringify(
+          {
+            generatedAt: new Date().toISOString(),
+            source: 'client-fallback',
+            reason,
+            sites: items.map((entry, idx) => ({
+              folder: `${String(idx + 1).padStart(2, '0')}-${entry.migration.siteSlug}-${entry.format}`,
+              id: entry.migration.id,
+              siteName: entry.migration.siteName,
+              platform: entry.migration.detectedPlatform,
+              format: entry.format,
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+      totalFiles += 1;
+
+      const blob = await masterZip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      triggerBlobDownload(blob, fallbackFilename);
+
+      const completedAtIso = new Date().toISOString();
+      const durationMs = Math.max(1, Date.now() - startedAtMs);
+      appendClientExportLog({
+        id: `exp-bulk-${Date.now().toString(16)}`,
+        migrationId: items.map((i) => i.migration.id).join(','),
+        siteName: `Bulk Export (${items.length} ${items.length === 1 ? 'Site' : 'Sites'})`,
+        siteSlug: `bulk-${items.length}-sites`,
+        platform: items[0].migration.detectedPlatform,
+        format: 'bulk',
+        filename: fallbackFilename,
+        status: 'success',
+        timestamp: completedAtIso,
+        durationMs,
+        sizeBytes: blob.size,
+        fileCount: totalFiles,
+        pagesCount: items.reduce((sum, i) => sum + i.migration.pages.length, 0),
+        blocksCount: items.reduce((sum, i) => sum + i.migration.metrics.gutenbergBlocksGenerated, 0),
+        assetsLocalized: items.reduce((sum, i) => sum + i.migration.metrics.assetsLocalized, 0),
+        scriptsStripped: items.reduce((sum, i) => sum + i.migration.metrics.scriptsStripped, 0),
+        scriptsReplacedLocal: items.reduce(
+          (sum, i) => sum + i.migration.metrics.scriptsReplacedLocal,
+          0,
+        ),
+        warningsCount: 1,
+        source: 'client-fallback',
+        entries: [
+          {
+            timestamp: startedAtIso,
+            level: 'INFO',
+            stage: 'INIT',
+            message: `Bulk export requested for ${items.length} queued migration(s).`,
+          },
+          {
+            timestamp: completedAtIso,
+            level: 'WARN',
+            stage: 'FALLBACK',
+            message: `Server bulk packager unavailable (${reason}); concatenated ${items.length} migration(s) in browser fallback engine.`,
+          },
+          {
+            timestamp: completedAtIso,
+            level: 'INFO',
+            stage: 'ARCHIVE',
+            message: `Built "${fallbackFilename}" (${blob.size} bytes, ${totalFiles} files) in ${durationMs} ms.`,
+          },
+        ],
+      });
+    };
+
+    try {
+      const res = await fetch('/api/migrate/bulk-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: items.map((entry) => ({
+            id: entry.migration.id,
+            format: entry.format,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const errPayload = await res.json().catch(() => ({}));
+        const reason = errPayload.error || `HTTP ${res.status} error`;
+        await buildClientBulkFallback(reason);
+        return;
+      }
+
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const filename = match?.[1] || fallbackFilename;
+      const blob = await res.blob();
+      triggerBlobDownload(blob, filename);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Bulk export request failed.';
+      try {
+        await buildClientBulkFallback(reason);
+      } catch (fallbackErr) {
+        setError(
+          fallbackErr instanceof Error ? fallbackErr.message : 'Could not build bulk export ZIP.',
+        );
+      }
+    } finally {
+      setBulkExporting(false);
+      void refreshExportLogs();
+    }
+  };
+
+  const handleToggleAutoOptimizeAssets = (enabled: boolean) => {
+    setAutoOptimizeAssets(enabled);
+    saveAutoOptimizeSetting(enabled);
+  };
+
+  const applyGlobalAutoOptimize = (options: MigrationOptions): MigrationOptions => {
+    if (!autoOptimizeAssets) return options;
+    return {
+      ...options,
+      replacePlatformJs: true,
+      stripTrackers: true,
+      localizeExternalJs: true,
+      localizeStylesAndFonts: true,
+      localizeImages: true,
+      optimizeImagesToJpeg: true,
+      imageJpegQuality: options.imageJpegQuality || 82,
+      imageMaxWidth: options.imageMaxWidth || 1600,
+    };
+  };
+
+  const handleClearKpiHistory = () => {
+    clearStoredMigrationKpis();
+    setKpiRecords([]);
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#F8FAFC] text-slate-900">
       <Sidebar
@@ -527,19 +734,47 @@ export default function App() {
 
           <div className="flex shrink-0 items-center gap-2.5">
             {activeMigration && (
-              <button
-                type="button"
-                disabled={downloadingFormat !== null}
-                onClick={() => handleDownload('offline')}
-                className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap shrink-0"
-              >
-                {downloadingFormat === 'offline' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <FolderArchive className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                Download Offline ZIP
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={downloadingFormat !== null}
+                  onClick={() => handleDownload('source')}
+                  className="hidden md:inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:border-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap shrink-0"
+                >
+                  {downloadingFormat === 'source' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Source ZIP
+                </button>
+                <button
+                  type="button"
+                  disabled={downloadingFormat !== null}
+                  onClick={() => handleDownload('updated')}
+                  className="hidden sm:inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap shrink-0"
+                >
+                  {downloadingFormat === 'updated' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <PackageCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Updated ZIP
+                </button>
+                <button
+                  type="button"
+                  disabled={downloadingFormat !== null}
+                  onClick={() => handleDownload('offline')}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:border-blue-600 hover:text-blue-700 disabled:opacity-50 whitespace-nowrap shrink-0"
+                >
+                  {downloadingFormat === 'offline' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <FolderArchive className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Download Offline ZIP
+                </button>
+              </>
             )}
 
             {activeMigration && activeTab !== 'export' ? (
@@ -570,10 +805,20 @@ export default function App() {
             <MigrationSetupView
               loading={loading}
               error={error}
-              onRunUrl={handleRunUrl}
-              onRunOffline={handleRunOffline}
-              onRunSample={handleRunSample}
+              autoOptimizeAssets={autoOptimizeAssets}
+              onToggleAutoOptimizeAssets={handleToggleAutoOptimizeAssets}
+              onRunUrl={(url, opts) => handleRunUrl(url, applyGlobalAutoOptimize(opts))}
+              onRunOffline={(files, html, opts) =>
+                handleRunOffline(files, html, applyGlobalAutoOptimize(opts))
+              }
+              onRunSample={(sampleId, opts) =>
+                handleRunSample(sampleId, applyGlobalAutoOptimize(opts))
+              }
               onOpenTutorial={() => setActiveTab('tutorial')}
+              kpiRecords={kpiRecords}
+              activeSessionIds={new Set(history.map((item) => item.id))}
+              onSelectMigration={handleSelectMigration}
+              onClearKpiHistory={handleClearKpiHistory}
             />
           )}
 
@@ -605,9 +850,16 @@ export default function App() {
           {activeTab === 'export' && activeMigration && (
             <ExportDeployView
               migration={activeMigration}
+              history={history}
+              kpiRecords={kpiRecords}
               downloadingFormat={downloadingFormat}
+              bulkExporting={bulkExporting}
               exportLogsCount={exportLogs.length}
+              error={error}
               onDownload={handleDownload}
+              onBulkExport={handleBulkExport}
+              onSelectMigration={handleSelectMigration}
+              onGoToSetup={() => setActiveTab('setup')}
               onOpenLogs={() => setActiveTab('logs')}
             />
           )}
@@ -635,7 +887,9 @@ export default function App() {
               exportLogsCount={exportLogs.length}
               loadingSample={loading}
               onNavigateTab={setActiveTab}
-              onLaunchGuidedSample={(sampleId) => void handleRunSample(sampleId, GUIDED_SAMPLE_OPTIONS)}
+              onLaunchGuidedSample={(sampleId) =>
+                void handleRunSample(sampleId, applyGlobalAutoOptimize(GUIDED_SAMPLE_OPTIONS))
+              }
             />
           )}
         </main>

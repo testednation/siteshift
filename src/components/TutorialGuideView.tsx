@@ -507,6 +507,20 @@ export function TutorialGuideView({
                 <td className="px-5 py-3">Developers who already have a custom WordPress theme and only need cleaned local files</td>
                 <td className="px-5 py-3">Copy <code className="font-mono text-slate-900">assets/</code> into your existing child theme</td>
               </tr>
+              <tr>
+                <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">
+                  Updated Site &amp; Gutenberg (.zip)
+                </td>
+                <td className="px-5 py-3">Downloading everything after builder stripping and Gutenberg conversion (cleaned HTML, per-page Gutenberg block files, WXR XML, optimized local assets, and audit report)</td>
+                <td className="px-5 py-3">Paste <code className="font-mono text-slate-900">gutenberg/*.gutenberg.html</code> into WordPress or inspect cleaned files locally</td>
+              </tr>
+              <tr>
+                <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">
+                  Original Site Source (.zip)
+                </td>
+                <td className="px-5 py-3">Archiving the untouched raw HTML and unoptimized assets before builder stripping, or re-migrating offline later</td>
+                <td className="px-5 py-3">Keep as a backup or drop back into <strong>New Migration → Offline Upload</strong></td>
+              </tr>
             </tbody>
           </table>
         </div>

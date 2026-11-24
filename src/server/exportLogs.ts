@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type {
   ExportFormat,
   ExportLogEntry,
+  ExportLogFormat,
   ExportLogLine,
   MigrationResult,
   PlatformType,
@@ -180,6 +181,22 @@ export function recordServerExportSuccess(params: {
         `Packaged standalone offline site with index.html, local pressport-runtime.js, pressport-base.css, asset-manifest.json, and OFFLINE-README.txt.`,
       ),
     );
+  } else if (format === 'source') {
+    entries.push(
+      makeLine(
+        'SOURCE',
+        'INFO',
+        `Packaged untouched original site source (${result.pages.length} raw HTML page(s), unoptimized captured source assets, source-manifest.json, and SOURCE-README.txt).`,
+      ),
+    );
+  } else if (format === 'updated') {
+    entries.push(
+      makeLine(
+        'UPDATED',
+        'INFO',
+        `Packaged post-strip & Gutenberg bundle (${result.pages.length} cleaned HTML page(s), ${result.metrics.gutenbergBlocksGenerated} Gutenberg blocks in gutenberg/*.gutenberg.html, WXR 1.2 XML, localized/optimized assets, and migration-report.json).`,
+      ),
+    );
   } else {
     entries.push(
       makeLine(
@@ -234,10 +251,133 @@ export function recordServerExportSuccess(params: {
   });
 }
 
+export function recordServerBulkExportSuccess(params: {
+  includedSites: Array<{
+    id: string;
+    siteName: string;
+    siteSlug: string;
+    platform: PlatformType;
+    format: ExportFormat;
+    folderName: string;
+    fileCount: number;
+    pagesCount: number;
+    blocksCount: number;
+    assetsLocalized: number;
+    scriptsStripped: number;
+    scriptsReplacedLocal: number;
+  }>;
+  skippedIds: string[];
+  filename: string;
+  sizeBytes: number;
+  fileCount: number;
+  packagedPaths: string[];
+  durationMs: number;
+  startedAtIso: string;
+}): ExportLogEntry {
+  const {
+    includedSites,
+    skippedIds,
+    filename,
+    sizeBytes,
+    fileCount,
+    packagedPaths,
+    durationMs,
+    startedAtIso,
+  } = params;
+  const completedAtIso = new Date().toISOString();
+  const entries: ExportLogLine[] = [];
+
+  const totalPages = includedSites.reduce((sum, s) => sum + s.pagesCount, 0);
+  const totalBlocks = includedSites.reduce((sum, s) => sum + s.blocksCount, 0);
+  const totalAssetsLocalized = includedSites.reduce((sum, s) => sum + s.assetsLocalized, 0);
+  const totalScriptsStripped = includedSites.reduce((sum, s) => sum + s.scriptsStripped, 0);
+  const totalScriptsReplaced = includedSites.reduce((sum, s) => sum + s.scriptsReplacedLocal, 0);
+
+  entries.push(
+    makeLine(
+      'INIT',
+      'INFO',
+      `Bulk export requested for ${includedSites.length + skippedIds.length} queued migration(s).`,
+      startedAtIso,
+    ),
+  );
+
+  for (const site of includedSites) {
+    entries.push(
+      makeLine(
+        'QUEUE',
+        'INFO',
+        `Concatenated "${site.siteName}" (${site.id}, ${site.platform.toUpperCase()}) as ${formatExportFormatLabel(site.format)} -> /${site.folderName}/ (${site.fileCount} files).`,
+      ),
+    );
+  }
+
+  for (const missingId of skippedIds) {
+    entries.push(
+      makeLine(
+        'LOOKUP',
+        'WARN',
+        `Queued migration "${missingId}" was not found in server memory and was skipped from the bulk archive.`,
+      ),
+    );
+  }
+
+  const previewPaths = packagedPaths.slice(0, 12).join(', ');
+  const extraPathsCount = Math.max(0, packagedPaths.length - 12);
+  entries.push(
+    makeLine(
+      'ARCHIVE',
+      'INFO',
+      `Built concatenated ZIP "${filename}" (${sizeBytes} bytes, ${fileCount} files across ${includedSites.length} site(s)) in ${durationMs} ms. Included: ${previewPaths}${extraPathsCount > 0 ? ` (+${extraPathsCount} more)` : ''}.`,
+      completedAtIso,
+    ),
+  );
+
+  entries.push(
+    makeLine(
+      'DELIVERY',
+      'INFO',
+      `Bulk export completed with ${skippedIds.length} warning(s).`,
+      completedAtIso,
+    ),
+  );
+
+  const label =
+    includedSites.length === 1
+      ? `${includedSites[0].siteName} (Bulk)`
+      : `Bulk Export (${includedSites.length} Sites: ${includedSites
+          .slice(0, 2)
+          .map((s) => s.siteName)
+          .join(', ')}${includedSites.length > 2 ? ` +${includedSites.length - 2}` : ''})`;
+
+  return pushExportLog({
+    id: createLogId(),
+    migrationId: includedSites.map((s) => s.id).join(','),
+    siteName: label,
+    siteSlug: `bulk-${includedSites.length}-sites`,
+    platform: includedSites[0]?.platform || 'html',
+    format: 'bulk',
+    filename,
+    status: 'success',
+    timestamp: completedAtIso,
+    durationMs,
+    sizeBytes,
+    fileCount,
+    pagesCount: totalPages,
+    blocksCount: totalBlocks,
+    assetsLocalized: totalAssetsLocalized,
+    scriptsStripped: totalScriptsStripped,
+    scriptsReplacedLocal: totalScriptsReplaced,
+    warningsCount: skippedIds.length,
+    source: 'server',
+    entries,
+  });
+}
+
 export function recordServerExportFailure(params: {
   migrationId: string;
   result?: MigrationResult;
-  format: ExportFormat;
+  format: ExportLogFormat;
   errorMessage: string;
   httpStatus: number;
   durationMs: number;
@@ -245,8 +385,9 @@ export function recordServerExportFailure(params: {
 }): ExportLogEntry {
   const { migrationId, result, format, errorMessage, httpStatus, durationMs, startedAtIso } = params;
   const failedAtIso = new Date().toISOString();
-  const siteSlug = result?.siteSlug || 'unknown-site';
-  const siteName = result?.siteName || `Migration ${migrationId}`;
+  const siteSlug = result?.siteSlug || (format === 'bulk' ? 'bulk-export' : 'unknown-site');
+  const siteName =
+    result?.siteName || (format === 'bulk' ? 'Bulk Export Queue' : `Migration ${migrationId}`);
   const platform: PlatformType = result?.detectedPlatform || 'html';
 
   const fallbackFilename =
@@ -256,7 +397,13 @@ export function recordServerExportFailure(params: {
         ? `${siteSlug}-wp-theme.zip`
         : format === 'offline'
           ? `${siteSlug}-offline-local.zip`
-          : `${siteSlug}-local-assets.zip`;
+          : format === 'source'
+            ? `${siteSlug}-site-source.zip`
+            : format === 'updated'
+              ? `${siteSlug}-updated-gutenberg.zip`
+              : format === 'bulk'
+                ? 'pressport-bulk-export.zip'
+                : `${siteSlug}-local-assets.zip`;
 
   const entries: ExportLogLine[] = [
     makeLine(

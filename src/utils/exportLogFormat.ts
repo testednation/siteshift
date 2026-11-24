@@ -1,6 +1,6 @@
-import type { ExportFormat, ExportLogEntry } from '../types/migration.ts';
+import type { ExportLogEntry, ExportLogFormat } from '../types/migration.ts';
 
-export function formatExportFormatLabel(format: ExportFormat): string {
+export function formatExportFormatLabel(format: ExportLogFormat): string {
   switch (format) {
     case 'theme':
       return 'WordPress Theme (.zip)';
@@ -10,12 +10,18 @@ export function formatExportFormatLabel(format: ExportFormat): string {
       return 'Standalone Offline (.zip)';
     case 'assets':
       return 'Local Assets (.zip)';
+    case 'source':
+      return 'Original Site Source (.zip)';
+    case 'updated':
+      return 'Updated Site & Gutenberg (.zip)';
+    case 'bulk':
+      return 'Bulk Concatenated Export (.zip)';
     default:
       return format;
   }
 }
 
-export function formatExportFormatShort(format: ExportFormat): string {
+export function formatExportFormatShort(format: ExportLogFormat): string {
   switch (format) {
     case 'theme':
       return 'WP Theme';
@@ -25,6 +31,12 @@ export function formatExportFormatShort(format: ExportFormat): string {
       return 'Offline ZIP';
     case 'assets':
       return 'Assets ZIP';
+    case 'source':
+      return 'Source ZIP';
+    case 'updated':
+      return 'Updated ZIP';
+    case 'bulk':
+      return 'Bulk ZIP';
     default:
       return format;
   }

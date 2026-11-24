@@ -152,7 +152,14 @@ export interface MigrationResult {
   warnings: string[];
 }
 
-export type ExportFormat = 'wxr' | 'theme' | 'offline' | 'assets';
+export type ExportFormat = 'wxr' | 'theme' | 'offline' | 'assets' | 'source' | 'updated';
+
+export type ExportLogFormat = ExportFormat | 'bulk';
+
+export interface BulkExportRequestItem {
+  id: string;
+  format: ExportFormat;
+}
 
 export type ExportLogStatus = 'success' | 'failed';
 
@@ -171,7 +178,7 @@ export interface ExportLogEntry {
   siteName: string;
   siteSlug: string;
   platform: PlatformType;
-  format: ExportFormat;
+  format: ExportLogFormat;
   filename: string;
   status: ExportLogStatus;
   timestamp: string;

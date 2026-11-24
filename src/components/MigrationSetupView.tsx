@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -6,13 +6,16 @@ import {
   FileCode,
   Globe,
   Loader2,
+  SlidersHorizontal,
   Trash2,
   Upload,
   X,
 } from 'lucide-react';
 import type { MigrationOptions, PlatformType, SampleId } from '../types/migration';
 import { formatBytes } from '../utils/format';
+import type { MigrationKpiRecord } from '../utils/migrationKpis';
 import { InfoTooltip } from './InfoTooltip';
+import { RecentMigrationsKpiWidget } from './RecentMigrationsKpiWidget';
 
 type SourceTab = 'url' | 'offline' | 'paste';
 
@@ -28,6 +31,8 @@ interface UploadedLocalFile {
 interface MigrationSetupViewProps {
   loading: boolean;
   error: string | null;
+  autoOptimizeAssets: boolean;
+  onToggleAutoOptimizeAssets: (enabled: boolean) => void;
   onRunUrl: (url: string, options: MigrationOptions) => Promise<void>;
   onRunOffline: (
     files: Array<{ name: string; contentBase64: string; mimeType?: string }>,
@@ -36,6 +41,10 @@ interface MigrationSetupViewProps {
   ) => Promise<void>;
   onRunSample: (sampleId: SampleId, options: MigrationOptions) => Promise<void>;
   onOpenTutorial?: () => void;
+  kpiRecords: MigrationKpiRecord[];
+  activeSessionIds: Set<string>;
+  onSelectMigration: (id: string) => void;
+  onClearKpiHistory: () => void;
 }
 
 const DEFAULT_OPTIONS: MigrationOptions = {
@@ -75,17 +84,94 @@ function readFileAsBase64(file: File): Promise<UploadedLocalFile> {
 export function MigrationSetupView({
   loading,
   error,
+  autoOptimizeAssets,
+  onToggleAutoOptimizeAssets,
   onRunUrl,
   onRunOffline,
   onRunSample,
   onOpenTutorial,
+  kpiRecords,
+  activeSessionIds,
+  onSelectMigration,
+  onClearKpiHistory,
 }: MigrationSetupViewProps) {
   const [sourceTab, setSourceTab] = useState<SourceTab>('url');
   const [urlInput, setUrlInput] = useState('');
   const [pastedHtml, setPastedHtml] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedLocalFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
-  const [options, setOptions] = useState<MigrationOptions>(DEFAULT_OPTIONS);
+  const [options, setOptions] = useState<MigrationOptions>(() =>
+    autoOptimizeAssets
+      ? {
+          ...DEFAULT_OPTIONS,
+          replacePlatformJs: true,
+          stripTrackers: true,
+          localizeExternalJs: true,
+          localizeStylesAndFonts: true,
+          localizeImages: true,
+          optimizeImagesToJpeg: true,
+          imageJpegQuality: 82,
+          imageMaxWidth: 1600,
+        }
+      : DEFAULT_OPTIONS,
+  );
+
+  useEffect(() => {
+    if (autoOptimizeAssets) {
+      setOptions((prev) => ({
+        ...prev,
+        replacePlatformJs: true,
+        stripTrackers: true,
+        localizeExternalJs: true,
+        localizeStylesAndFonts: true,
+        localizeImages: true,
+        optimizeImagesToJpeg: true,
+        imageJpegQuality: 82,
+        imageMaxWidth: 1600,
+      }));
+    }
+  }, [autoOptimizeAssets]);
+
+  const handleGlobalAutoOptimizeToggle = () => {
+    const nextEnabled = !autoOptimizeAssets;
+    onToggleAutoOptimizeAssets(nextEnabled);
+    if (nextEnabled) {
+      setOptions((prev) => ({
+        ...prev,
+        replacePlatformJs: true,
+        stripTrackers: true,
+        localizeExternalJs: true,
+        localizeStylesAndFonts: true,
+        localizeImages: true,
+        optimizeImagesToJpeg: true,
+        imageJpegQuality: 82,
+        imageMaxWidth: 1600,
+      }));
+    } else {
+      setOptions((prev) => ({
+        ...prev,
+        optimizeImagesToJpeg: false,
+      }));
+    }
+  };
+
+  const updatePolicyOption = <K extends keyof MigrationOptions>(
+    key: K,
+    value: MigrationOptions[K],
+  ) => {
+    const next = { ...options, [key]: value };
+    setOptions(next);
+    const meetsAutoPreset =
+      next.replacePlatformJs &&
+      next.stripTrackers &&
+      next.localizeExternalJs &&
+      next.localizeStylesAndFonts &&
+      next.localizeImages &&
+      next.optimizeImagesToJpeg;
+    if (autoOptimizeAssets && !meetsAutoPreset) {
+      onToggleAutoOptimizeAssets(false);
+    }
+  };
   const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
     try {
       return window.localStorage.getItem(TUTORIAL_BANNER_STORAGE_KEY) === '1';
@@ -212,6 +298,16 @@ export function MigrationSetupView({
           <span className="font-semibold">Migration error:</span> {error}
         </div>
       )}
+
+      {/* Recent Migrations KPI Dashboard Widget */}
+      <RecentMigrationsKpiWidget
+        records={kpiRecords}
+        activeSessionIds={activeSessionIds}
+        loading={loading}
+        onSelectMigration={onSelectMigration}
+        onRunSample={(sampleId) => void onRunSample(sampleId, options)}
+        onClearHistory={onClearKpiHistory}
+      />
 
       {/* Main Split Grid: Source Intake + Optimization Rules */}
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-6 lg:grid-cols-12">
@@ -488,11 +584,65 @@ export function MigrationSetupView({
             </p>
           </div>
 
-          <div className="mt-4 divide-y divide-slate-100">
+          {/* Global Auto-Optimize Assets Switch */}
+          <div className="mt-4 border-b border-slate-200 pb-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-blue-700" aria-hidden="true" />
+                  <label
+                    htmlFor="opt-global-auto-optimize"
+                    className="cursor-pointer text-sm font-semibold text-slate-950"
+                  >
+                    Auto-Optimize Assets
+                  </label>
+                  <InfoTooltip
+                    title="Global Auto-Optimize Assets"
+                    content="Saves a global preset across all new migrations (Live URL, Offline Upload, Paste HTML, and Samples). Automatically enables builder JS replacement, tracker stripping, local asset bundling, and progressive JPEG compression (82% quality, max 1600px)."
+                    tip="Turning off any individual optimization below switches back to Custom mode so you stay in full control."
+                  />
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Automatically enables recommended progressive JPEG image optimization and builder JS/tracker stripping
+                  for all new migrations.
+                </p>
+                <p
+                  className={`mt-1.5 text-[11px] font-medium ${
+                    autoOptimizeAssets ? 'text-emerald-700' : 'text-slate-500'
+                  }`}
+                >
+                  {autoOptimizeAssets
+                    ? 'Active globally · JPEG 82% (max 1600px) · JS & tracker stripping enabled'
+                    : 'Off · Configure individual asset rules below'}
+                </p>
+              </div>
+
+              <button
+                id="opt-global-auto-optimize"
+                type="button"
+                role="switch"
+                aria-checked={autoOptimizeAssets}
+                onClick={handleGlobalAutoOptimizeToggle}
+                className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${
+                  autoOptimizeAssets ? 'bg-blue-700' : 'bg-slate-300'
+                }`}
+              >
+                <span className="sr-only">Toggle global Auto-Optimize Assets for all new migrations</span>
+                <span
+                  aria-hidden="true"
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform ${
+                    autoOptimizeAssets ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-2 divide-y divide-slate-100">
             <PolicyToggle
               id="opt-replace-platform"
               checked={options.replacePlatformJs}
-              onChange={(checked) => setOptions((o) => ({ ...o, replacePlatformJs: checked }))}
+              onChange={(checked) => updatePolicyOption('replacePlatformJs', checked)}
               title="Replace site-builder runtime JS"
               description="Replaces heavy Wix Thunderbolt, Squarespace universal JS, Strikingly Bobcat, Webflow, and Weebly bundles with our 3.5 KB local runtime."
               tooltip={{
@@ -505,7 +655,7 @@ export function MigrationSetupView({
             <PolicyToggle
               id="opt-strip-trackers"
               checked={options.stripTrackers}
-              onChange={(checked) => setOptions((o) => ({ ...o, stripTrackers: checked }))}
+              onChange={(checked) => updatePolicyOption('stripTrackers', checked)}
               title="Strip telemetry & third-party trackers"
               description="Removes Frog BI, Squarespace performance scripts, Mixpanel, Segment, Tag Manager, and proprietary JSON hydration blobs."
               tooltip={{
@@ -517,7 +667,7 @@ export function MigrationSetupView({
             <PolicyToggle
               id="opt-localize-js"
               checked={options.localizeExternalJs}
-              onChange={(checked) => setOptions((o) => ({ ...o, localizeExternalJs: checked }))}
+              onChange={(checked) => updatePolicyOption('localizeExternalJs', checked)}
               title="Localize custom & widget JavaScript"
               description="Downloads remaining external scripts into assets/js/ and registers them via wp_enqueue_script()."
               tooltip={{
@@ -529,7 +679,7 @@ export function MigrationSetupView({
             <PolicyToggle
               id="opt-localize-css"
               checked={options.localizeStylesAndFonts}
-              onChange={(checked) => setOptions((o) => ({ ...o, localizeStylesAndFonts: checked }))}
+              onChange={(checked) => updatePolicyOption('localizeStylesAndFonts', checked)}
               title="Bundle local CSS & disable WP emoji CDN"
               description="Rewrites stylesheets to local theme paths and removes default remote WordPress head scripts."
               tooltip={{
@@ -541,7 +691,7 @@ export function MigrationSetupView({
             <PolicyToggle
               id="opt-localize-img"
               checked={options.localizeImages}
-              onChange={(checked) => setOptions((o) => ({ ...o, localizeImages: checked }))}
+              onChange={(checked) => updatePolicyOption('localizeImages', checked)}
               title="Localize images for offline rendering"
               description="Rewrites wixstatic.com, squarespace-cdn.com, strikinglycdn.com, and website-files.com media URLs to local assets/images/."
               tooltip={{
@@ -553,7 +703,7 @@ export function MigrationSetupView({
             <PolicyToggle
               id="opt-optimize-jpeg"
               checked={options.optimizeImagesToJpeg}
-              onChange={(checked) => setOptions((o) => ({ ...o, optimizeImagesToJpeg: checked }))}
+              onChange={(checked) => updatePolicyOption('optimizeImagesToJpeg', checked)}
               title="Optimize high-res images to progressive JPEG"
               description="Compresses and converts WebP and heavy PNG images into progressive JPEGs (82% quality, max 1600px wide) during migration. Can also be toggled anytime in Assets & Scripts."
               tooltip={{

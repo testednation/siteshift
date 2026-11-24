@@ -19,6 +19,7 @@ import {
 import type {
   ExportFormat,
   ExportLogEntry,
+  ExportLogFormat,
   MigrationResult,
   PlatformType,
 } from '../types/migration';
@@ -83,9 +84,10 @@ export function ExportLogsView({
   onQuickExport,
 }: ExportLogsViewProps) {
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'failed'>('all');
-  const [formatFilter, setFormatFilter] = useState<'all' | ExportFormat>('all');
+  const [formatFilter, setFormatFilter] = useState<'all' | ExportLogFormat>('all');
   const [platformFilter, setPlatformFilter] = useState<'all' | PlatformType>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchField, setSearchField] = useState<'all' | 'site' | 'id' | 'filename'>('all');
   const [selectedLogId, setSelectedLogId] = useState<string | null>(logs[0]?.id || null);
   const [traceFilter, setTraceFilter] = useState<'all' | 'issues'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -121,12 +123,14 @@ export function ExportLogsView({
 
   const hasActiveFilters =
     searchQuery.trim().length > 0 ||
+    searchField !== 'all' ||
     platformFilter !== 'all' ||
     statusFilter !== 'all' ||
     formatFilter !== 'all';
 
   const resetAllFilters = () => {
     setSearchQuery('');
+    setSearchField('all');
     setPlatformFilter('all');
     setStatusFilter('all');
     setFormatFilter('all');
@@ -145,23 +149,36 @@ export function ExportLogsView({
       if (platformFilter !== 'all' && entry.platform !== platformFilter) return false;
       if (tokens.length === 0) return true;
 
-      const searchableHaystack = [
-        entry.siteName,
-        entry.siteSlug,
-        entry.platform,
-        formatPlatformLabel(entry.platform),
-        entry.filename,
-        entry.id,
-        formatExportFormatLabel(entry.format),
-        formatExportFormatShort(entry.format),
-        entry.errorMessage || '',
-      ]
-        .join(' ')
-        .toLowerCase();
+      const fieldParts =
+        searchField === 'site'
+          ? [entry.siteName, entry.siteSlug]
+          : searchField === 'id'
+            ? [entry.id, entry.migrationId]
+            : searchField === 'filename'
+              ? [
+                  entry.filename,
+                  buildExportLogFilename(entry, 'log'),
+                  buildExportLogFilename(entry, 'json'),
+                ]
+              : [
+                  entry.siteName,
+                  entry.siteSlug,
+                  entry.id,
+                  entry.migrationId,
+                  entry.filename,
+                  buildExportLogFilename(entry, 'log'),
+                  buildExportLogFilename(entry, 'json'),
+                  entry.platform,
+                  formatPlatformLabel(entry.platform),
+                  formatExportFormatLabel(entry.format),
+                  formatExportFormatShort(entry.format),
+                  entry.errorMessage || '',
+                ];
 
+      const searchableHaystack = fieldParts.join(' ').toLowerCase();
       return tokens.every((token) => searchableHaystack.includes(token));
     });
-  }, [logs, statusFilter, formatFilter, platformFilter, searchQuery]);
+  }, [logs, statusFilter, formatFilter, platformFilter, searchQuery, searchField]);
 
   useEffect(() => {
     if (filteredLogs.length === 0) {
@@ -219,7 +236,7 @@ export function ExportLogsView({
             <InfoTooltip
               title="How Export Logs Help Beginners"
               content="Every time you download a Theme, WXR XML, or Offline ZIP, PressPort records a step-by-step trace here. If an image was skipped or a WordPress import shows a warning, download the .log file to see exactly why."
-              tip="Press / anywhere on this page to quickly search logs by site name or platform."
+              tip="Press / anywhere on this page to filter logs in real-time by site name, ID, file name, or platform."
             />
           </div>
           <p className="mt-1 text-sm text-slate-600">
@@ -285,54 +302,85 @@ export function ExportLogsView({
         </div>
       </div>
 
-      {/* Global Search Bar for Migration History (Site Name & Platform) */}
+      {/* Real-Time Search & Filter Bar (Site Name, ID, File Name & Platform) */}
       <section
-        aria-label="Search export history"
+        aria-label="Filter export logs in real time"
         className="overflow-hidden rounded-lg border border-slate-200 bg-white"
       >
         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              ref={searchInputRef}
-              type="text"
-              role="searchbox"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape' && searchQuery) {
-                  e.preventDefault();
-                  setSearchQuery('');
-                }
-              }}
-              placeholder="Search export history by site name or platform (e.g., Wix, Squarespace, Strikingly, Webflow)..."
-              aria-label="Global search export logs by site name or platform"
-              className="w-full rounded-md border border-slate-300 bg-white py-2.5 pl-9 pr-20 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/15"
-            />
-            <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => {
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex-1">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <label htmlFor="export-logs-search-input" className="sr-only">
+                Filter export logs in real-time by site name, ID, or file name
+              </label>
+              <input
+                id="export-logs-search-input"
+                ref={searchInputRef}
+                type="text"
+                role="searchbox"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && searchQuery) {
+                    e.preventDefault();
                     setSearchQuery('');
-                    searchInputRef.current?.focus();
-                  }}
-                  aria-label="Clear search query"
-                  className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              ) : (
-                <kbd
-                  className="hidden select-none rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-400 sm:inline-block"
-                  title="Press / to search"
-                >
-                  /
-                </kbd>
-              )}
+                  }
+                }}
+                placeholder={
+                  searchField === 'site'
+                    ? 'Filter by site name (e.g. Kanso, Northline)...'
+                    : searchField === 'id'
+                      ? 'Filter by log or migration ID (e.g. exp-, mig-)...'
+                      : searchField === 'filename'
+                        ? 'Filter by file name (e.g. wp-theme.zip, .xml)...'
+                        : 'Filter logs in real-time by site name, ID, or file name...'
+                }
+                aria-label="Filter export logs in real-time by site name, ID, or file name"
+                className="w-full rounded-md border border-slate-300 bg-white py-2.5 pl-9 pr-14 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/15"
+              />
+              <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-1.5">
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search query"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <kbd
+                    className="hidden select-none rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-400 sm:inline-block"
+                    title="Press / to filter logs"
+                  >
+                    /
+                  </kbd>
+                )}
+              </div>
+            </div>
+
+            <div className="shrink-0">
+              <label htmlFor="export-logs-search-field" className="sr-only">
+                Filter field scope
+              </label>
+              <select
+                id="export-logs-search-field"
+                value={searchField}
+                onChange={(e) => setSearchField(e.target.value as 'all' | 'site' | 'id' | 'filename')}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 focus:border-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-600/15 sm:w-auto"
+              >
+                <option value="all">Match: All Fields</option>
+                <option value="site">Match: Site Name</option>
+                <option value="id">Match: Log / Migration ID</option>
+                <option value="filename">Match: File Name</option>
+              </select>
             </div>
           </div>
 
@@ -519,14 +567,17 @@ export function ExportLogsView({
                 <select
                   id="export-log-format-filter"
                   value={formatFilter}
-                  onChange={(e) => setFormatFilter(e.target.value as 'all' | ExportFormat)}
+                  onChange={(e) => setFormatFilter(e.target.value as 'all' | ExportLogFormat)}
                   className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-blue-600 focus:outline-none"
                 >
                   <option value="all">All Formats</option>
                   <option value="theme">WordPress Theme (.zip)</option>
                   <option value="wxr">WordPress WXR 1.2 (.xml)</option>
                   <option value="offline">Standalone Offline (.zip)</option>
+                  <option value="updated">Updated Site &amp; Gutenberg (.zip)</option>
                   <option value="assets">Local Assets (.zip)</option>
+                  <option value="source">Original Site Source (.zip)</option>
+                  <option value="bulk">Bulk Concatenated Export (.zip)</option>
                 </select>
               </div>
 
@@ -575,7 +626,10 @@ export function ExportLogsView({
                         >
                           <td className="px-4 py-3 align-middle font-mono text-xs tabular-nums text-slate-700 whitespace-nowrap">
                             <div>{formatTimestamp(entry.timestamp)}</div>
-                            <div className="mt-0.5 text-[11px] text-slate-400">{entry.id}</div>
+                            <div className="mt-0.5 text-[11px] text-slate-400">
+                              {entry.id}
+                              {entry.migrationId ? ` · ${entry.migrationId}` : ''}
+                            </div>
                           </td>
 
                           <td className="px-4 py-3 align-middle">

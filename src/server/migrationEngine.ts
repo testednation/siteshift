@@ -6,6 +6,8 @@ import type {
   AssetCategory,
   AssetItem,
   AssetKind,
+  BulkExportRequestItem,
+  ExportFormat,
   ExtractedBlock,
   ExtractedSection,
   MigratedPage,
@@ -2148,7 +2150,7 @@ export async function updateJobImageOptimization(
 
 export async function buildExportArtifact(
   jobId: string,
-  format: 'wxr' | 'theme' | 'offline' | 'assets',
+  format: ExportFormat,
 ): Promise<{
   filename: string;
   mimeType: string;
@@ -2161,7 +2163,7 @@ export async function buildExportArtifact(
     throw new Error('Migration session not found.');
   }
 
-  const { result, assetBinaries } = job;
+  const { result, rawPages, assetBinaries, originalAssetBinaries, extraUploadedFiles } = job;
   const slug = result.siteSlug;
 
   if (format === 'wxr') {
@@ -2263,6 +2265,284 @@ export async function buildExportArtifact(
     };
   }
 
+  if (format === 'source') {
+    const usedPaths = new Set<string>();
+    const addUniqueFile = (desiredPath: string, content: string | Buffer): string => {
+      const safePath = desiredPath
+        .replace(/^\/+/, '')
+        .replace(/\.\.(\/|\\)/g, '')
+        .replace(/\\/g, '/');
+      let finalPath = safePath || 'file.dat';
+      if (usedPaths.has(finalPath)) {
+        const dotIdx = finalPath.lastIndexOf('.');
+        let counter = 2;
+        while (usedPaths.has(finalPath)) {
+          finalPath =
+            dotIdx > 0
+              ? `${safePath.slice(0, dotIdx)}-${counter}${safePath.slice(dotIdx)}`
+              : `${safePath}-${counter}`;
+          counter++;
+        }
+      }
+      usedPaths.add(finalPath);
+      zip.file(finalPath, content);
+      return finalPath;
+    };
+
+    // 1. Raw, untouched HTML source pages at archive root (directly re-uploadable via Offline Upload)
+    const manifestPages: Array<{
+      filename: string;
+      slug: string;
+      sourceUrl: string;
+      bytes: number;
+    }> = [];
+    for (const rawPage of rawPages) {
+      const safeName = sanitizeFilename(rawPage.filename || `${rawPage.slug}.html`, 'html');
+      const archivedPath = addUniqueFile(safeName, rawPage.html);
+      manifestPages.push({
+        filename: archivedPath,
+        slug: rawPage.slug,
+        sourceUrl: rawPage.sourceUrl,
+        bytes: Buffer.byteLength(rawPage.html, 'utf8'),
+      });
+    }
+
+    // 2. Untouched original captured assets (pre-optimization PNG/WebP/SVG, original CSS, original JS, inline scripts)
+    const capturedAssetBaseNames = new Set<string>();
+    const manifestAssets: Array<{
+      id: string;
+      kind: AssetKind;
+      category: AssetCategory;
+      originalUrl: string;
+      displayName: string;
+      archivedPath: string | null;
+      originalBytes: number;
+      fetchedLocally: boolean;
+    }> = [];
+
+    for (const asset of result.assets) {
+      const originalBin = originalAssetBinaries.get(asset.id);
+      let archivedPath: string | null = null;
+
+      if (originalBin) {
+        const subFolder =
+          asset.kind === 'inline-script'
+            ? 'inline-scripts'
+            : asset.kind === 'script'
+              ? 'js'
+              : asset.kind === 'stylesheet'
+                ? 'css'
+                : asset.kind === 'font'
+                  ? 'fonts'
+                  : 'images';
+        const fallbackExt =
+          subFolder === 'js' || subFolder === 'inline-scripts'
+            ? 'js'
+            : subFolder === 'css'
+              ? 'css'
+              : subFolder === 'fonts'
+                ? 'woff2'
+                : originalBin.mimeType === 'image/svg+xml'
+                  ? 'svg'
+                  : 'png';
+        const safeAssetName = sanitizeFilename(asset.displayName, fallbackExt);
+        archivedPath = addUniqueFile(`source-assets/${subFolder}/${safeAssetName}`, originalBin.buffer);
+        capturedAssetBaseNames.add(safeAssetName);
+        capturedAssetBaseNames.add(asset.displayName);
+      }
+
+      manifestAssets.push({
+        id: asset.id,
+        kind: asset.kind,
+        category: asset.category,
+        originalUrl: asset.originalUrl,
+        displayName: asset.displayName,
+        archivedPath,
+        originalBytes: asset.originalBytes,
+        fetchedLocally: asset.fetchedLocally,
+      });
+    }
+
+    // 3. Any additional uploaded files from an offline ZIP not already packaged
+    const seenBuffers = new Set<Buffer>();
+    for (const [key, bin] of extraUploadedFiles.entries()) {
+      if (seenBuffers.has(bin.buffer)) continue;
+      const baseName = key.split('/').pop() || key;
+      if (!baseName || baseName.endsWith('.html') || baseName.endsWith('.htm')) continue;
+      if (capturedAssetBaseNames.has(baseName)) continue;
+      seenBuffers.add(bin.buffer);
+      const safeExtra = sanitizeFilename(baseName, 'bin');
+      addUniqueFile(`source-assets/extra/${safeExtra}`, bin.buffer);
+    }
+
+    // 4. Source manifest & plain-English README
+    addUniqueFile(
+      'source-manifest.json',
+      JSON.stringify(
+        {
+          siteName: result.siteName,
+          siteSlug: result.siteSlug,
+          sourceLabel: result.sourceLabel,
+          sourceMode: result.sourceMode,
+          detectedPlatform: result.detectedPlatform,
+          detectionSignals: result.detectionSignals,
+          capturedAt: result.createdAt,
+          pageCount: manifestPages.length,
+          assetCount: manifestAssets.length,
+          pages: manifestPages,
+          assets: manifestAssets,
+        },
+        null,
+        2,
+      ),
+    );
+
+    addUniqueFile(
+      'SOURCE-README.txt',
+      [
+        `${result.siteName} — Original Captured Site Source Archive`,
+        '=========================================================',
+        `Source Platform:  ${result.detectedPlatform.toUpperCase()}`,
+        `Origin:           ${result.sourceLabel}`,
+        `Captured At:      ${result.createdAt}`,
+        `Raw HTML Pages:   ${manifestPages.map((p) => p.filename).join(', ')}`,
+        `Captured Assets:  ${manifestAssets.filter((a) => a.archivedPath).length} original files`,
+        '',
+        'WHAT IS INSIDE:',
+        '  - Root *.html files: Untouched original HTML captured BEFORE PressPort stripped',
+        '    builder scripts, replaced JS, or converted pages to WordPress Gutenberg blocks.',
+        '  - source-assets/: Original unoptimized media, stylesheets, external scripts, and',
+        '    inline scripts captured during the crawl/upload.',
+        '  - source-manifest.json: Full index of original URLs, detection signals, and sizes.',
+        '',
+        'TIP — RE-MIGRATE OFFLINE ANYTIME:',
+        '  You can drop this exact .zip archive directly into PressPort -> New Migration ->',
+        '  Offline Upload to re-run or experiment with different WordPress policies offline.',
+      ].join('\n'),
+    );
+
+    const packagedPaths = Object.values(zip.files)
+      .filter((entry) => !entry.dir)
+      .map((entry) => entry.name);
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    return {
+      filename: `${slug}-site-source.zip`,
+      mimeType: 'application/zip',
+      buffer,
+      fileCount: packagedPaths.length,
+      packagedPaths,
+    };
+  }
+
+  if (format === 'updated') {
+    // 1. Cleaned, builder-stripped HTML pages at root (zero trackers, local asset paths)
+    for (const page of result.pages) {
+      const htmlFilename = page.isHome ? 'index.html' : `${page.slug}.html`;
+      zip.file(htmlFilename, page.offlineHtml);
+
+      // 2. Converted WordPress Gutenberg block markup per page
+      const blockFilename = page.isHome ? 'home.gutenberg.html' : `${page.slug}.gutenberg.html`;
+      zip.file(`gutenberg/${blockFilename}`, page.gutenbergContent);
+    }
+
+    // 3. Structured Gutenberg sections & blocks JSON export
+    zip.file(
+      'gutenberg/pages-blocks.json',
+      JSON.stringify(
+        {
+          siteName: result.siteName,
+          siteSlug: result.siteSlug,
+          detectedPlatform: result.detectedPlatform,
+          generatedAt: new Date().toISOString(),
+          totalBlocks: result.metrics.gutenbergBlocksGenerated,
+          pages: result.pages.map((p) => ({
+            id: p.id,
+            slug: p.slug,
+            title: p.title,
+            metaDescription: p.metaDescription,
+            isHome: p.isHome,
+            wordCount: p.wordCount,
+            imageCount: p.imageCount,
+            scriptCountBefore: p.scriptCountBefore,
+            scriptCountAfter: p.scriptCountAfter,
+            sections: p.sections,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
+
+    // 4. WordPress WXR 1.2 XML containing all converted Gutenberg pages
+    zip.file(`wordpress/${slug}-wordpress-wxr.xml`, result.wxrXml);
+
+    // 5. Local runtime, base stylesheet, and all active localized/optimized assets
+    zip.file('assets/js/pressport-runtime.js', PRESSPORT_LOCAL_RUNTIME_JS);
+    zip.file('assets/css/pressport-base.css', PRESSPORT_BASE_CSS);
+    for (const asset of result.assets) {
+      if (asset.action === 'localize' && asset.localPath) {
+        const bin = assetBinaries.get(asset.id);
+        if (bin) {
+          zip.file(asset.localPath, bin.buffer);
+        }
+      }
+    }
+
+    // 6. Post-migration audit report & README
+    zip.file(
+      'migration-report.json',
+      JSON.stringify(
+        {
+          siteName: result.siteName,
+          siteSlug: result.siteSlug,
+          detectedPlatform: result.detectedPlatform,
+          sourceLabel: result.sourceLabel,
+          options: result.options,
+          metrics: result.metrics,
+          warnings: result.warnings,
+          assets: result.assets,
+        },
+        null,
+        2,
+      ),
+    );
+
+    zip.file(
+      'UPDATED-README.txt',
+      [
+        `${result.siteName} — Updated Site & Gutenberg Conversion Archive`,
+        '================================================================',
+        `Source Platform:       ${result.detectedPlatform.toUpperCase()}`,
+        `Pages Converted:       ${result.pages.length}`,
+        `Gutenberg Blocks:      ${result.metrics.gutenbergBlocksGenerated}`,
+        `Builder JS Stripped:   ${result.metrics.scriptsStripped} stripped, ${result.metrics.scriptsReplacedLocal} replaced locally (-${result.metrics.jsPercentSaved}% JS weight)`,
+        `External CDN Requests: ${result.metrics.externalRequestsBefore} -> ${result.metrics.externalRequestsAfter}`,
+        '',
+        'WHAT IS INSIDE:',
+        '  - Root *.html files: Cleaned HTML pages after builder script & tracker stripping',
+        '    (linked to ./assets/ for 100% offline viewing).',
+        '  - gutenberg/*.gutenberg.html: Native WordPress Gutenberg block markup ready to',
+        '    paste directly into the WordPress Block Editor (Code Editor view).',
+        '  - gutenberg/pages-blocks.json: Structured JSON tree of all converted sections & blocks.',
+        `  - wordpress/${slug}-wordpress-wxr.xml: Ready-to-import WordPress WXR 1.2 XML file.`,
+        '  - assets/: Local pressport-runtime.js, pressport-base.css, and all localized/optimized media.',
+        '  - migration-report.json: Full before/after performance & asset transformation audit.',
+      ].join('\n'),
+    );
+
+    const packagedPaths = Object.values(zip.files)
+      .filter((entry) => !entry.dir)
+      .map((entry) => entry.name);
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    return {
+      filename: `${slug}-updated-gutenberg.zip`,
+      mimeType: 'application/zip',
+      buffer,
+      fileCount: packagedPaths.length,
+      packagedPaths,
+    };
+  }
+
   // format === 'assets'
   zip.file('assets/js/pressport-runtime.js', PRESSPORT_LOCAL_RUNTIME_JS);
   zip.file('assets/css/pressport-base.css', PRESSPORT_BASE_CSS);
@@ -2300,6 +2580,159 @@ export async function buildExportArtifact(
     buffer,
     fileCount: packagedPaths.length,
     packagedPaths,
+  };
+}
+
+export async function buildBulkExportArchive(items: BulkExportRequestItem[]): Promise<{
+  filename: string;
+  mimeType: string;
+  buffer: Buffer;
+  fileCount: number;
+  packagedPaths: string[];
+  includedSites: Array<{
+    id: string;
+    siteName: string;
+    siteSlug: string;
+    platform: PlatformType;
+    format: ExportFormat;
+    folderName: string;
+    fileCount: number;
+    pagesCount: number;
+    blocksCount: number;
+    assetsLocalized: number;
+    scriptsStripped: number;
+    scriptsReplacedLocal: number;
+  }>;
+  skippedIds: string[];
+}> {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Select at least one migration to build a bulk export ZIP.');
+  }
+
+  const masterZip = new JSZip();
+  const usedFolders = new Set<string>();
+  const includedSites: Array<{
+    id: string;
+    siteName: string;
+    siteSlug: string;
+    platform: PlatformType;
+    format: ExportFormat;
+    folderName: string;
+    fileCount: number;
+    pagesCount: number;
+    blocksCount: number;
+    assetsLocalized: number;
+    scriptsStripped: number;
+    scriptsReplacedLocal: number;
+  }> = [];
+  const skippedIds: string[] = [];
+
+  for (const item of items) {
+    const job = jobStore.get(item.id);
+    if (!job) {
+      skippedIds.push(item.id);
+      continue;
+    }
+
+    const artifact = await buildExportArtifact(item.id, item.format);
+    const indexPrefix = String(includedSites.length + 1).padStart(2, '0');
+    let folderName = `${indexPrefix}-${job.result.siteSlug}-${item.format}`;
+    let dupCounter = 2;
+    while (usedFolders.has(folderName)) {
+      folderName = `${indexPrefix}-${job.result.siteSlug}-${item.format}-${dupCounter}`;
+      dupCounter++;
+    }
+    usedFolders.add(folderName);
+
+    const siteFolder = masterZip.folder(folderName)!;
+    let unpackedFileCount = 0;
+
+    if (item.format === 'wxr') {
+      siteFolder.file(artifact.filename, artifact.buffer);
+      unpackedFileCount = 1;
+    } else {
+      const innerZip = await JSZip.loadAsync(artifact.buffer);
+      const innerEntries = Object.values(innerZip.files).filter((entry) => !entry.dir);
+      for (const entry of innerEntries) {
+        const entryBuffer = await entry.async('nodebuffer');
+        siteFolder.file(entry.name, entryBuffer);
+        unpackedFileCount++;
+      }
+    }
+
+    includedSites.push({
+      id: job.result.id,
+      siteName: job.result.siteName,
+      siteSlug: job.result.siteSlug,
+      platform: job.result.detectedPlatform,
+      format: item.format,
+      folderName,
+      fileCount: unpackedFileCount,
+      pagesCount: job.result.pages.length,
+      blocksCount: job.result.metrics.gutenbergBlocksGenerated,
+      assetsLocalized: job.result.metrics.assetsLocalized,
+      scriptsStripped: job.result.metrics.scriptsStripped,
+      scriptsReplacedLocal: job.result.metrics.scriptsReplacedLocal,
+    });
+  }
+
+  if (includedSites.length === 0) {
+    throw new Error(
+      'None of the selected migrations are available in active server memory. Re-run a migration and try again.',
+    );
+  }
+
+  const generatedAt = new Date().toISOString();
+  const stamp = generatedAt.replace(/[:.]/g, '-').slice(0, 19);
+
+  masterZip.file(
+    'BULK-EXPORT-MANIFEST.json',
+    JSON.stringify(
+      {
+        generatedAt,
+        totalQueued: items.length,
+        totalIncluded: includedSites.length,
+        skippedIds,
+        sites: includedSites,
+      },
+      null,
+      2,
+    ),
+  );
+
+  masterZip.file(
+    'BULK-EXPORT-README.txt',
+    [
+      `PressPort Bulk Concatenated Export (${includedSites.length} ${includedSites.length === 1 ? 'Site' : 'Sites'})`,
+      '================================================================',
+      `Generated At: ${generatedAt}`,
+      `Included Migrations: ${includedSites.length}`,
+      ...(skippedIds.length > 0 ? [`Skipped Expired Sessions: ${skippedIds.join(', ')}`] : []),
+      '',
+      'INCLUDED FOLDERS:',
+      ...includedSites.map(
+        (site, idx) =>
+          `  ${idx + 1}. /${site.folderName}/ — ${site.siteName} (${site.platform.toUpperCase()}, ${site.format}, ${site.fileCount} files, ${site.pagesCount} pages, ${site.blocksCount} Gutenberg blocks)`,
+      ),
+      '',
+      'Each folder contains the full unpacked export package for that migration, ready to deploy or import into WordPress.',
+    ].join('\n'),
+  );
+
+  const packagedPaths = Object.values(masterZip.files)
+    .filter((entry) => !entry.dir)
+    .map((entry) => entry.name);
+  const buffer = await masterZip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const filename = `pressport-bulk-${includedSites.length}-sites-${stamp}.zip`;
+
+  return {
+    filename,
+    mimeType: 'application/zip',
+    buffer,
+    fileCount: packagedPaths.length,
+    packagedPaths,
+    includedSites,
+    skippedIds,
   };
 }
 
